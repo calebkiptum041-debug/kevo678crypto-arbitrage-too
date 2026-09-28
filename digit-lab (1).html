@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Digit Lab</title>
+<style>
+:root{--bg:#10151c;--pn:#182029;--ln:#2a3541;--tx:#e6edf3;--mu:#8a99a8;--ac:#4cc9f0;--ok:#5fd38d;--no:#ff6b6b}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 Georgia,serif;padding:16px;max-width:900px;margin:auto}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:17px;margin:0 0 10px}p{margin:0 0 8px;color:var(--mu)}
+.pn{background:var(--pn);border:1px solid var(--ln);border-radius:6px;padding:14px;margin:12px 0}
+.warn{border-left:4px solid var(--no)}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
+label{display:flex;flex-direction:column;font-size:13px;color:var(--mu);gap:3px}
+select,input,button{font:inherit;background:var(--bg);color:var(--tx);border:1px solid var(--ln);border-radius:4px;padding:6px 8px}
+input{width:90px}button{background:var(--ac);color:#06202a;border:0;cursor:pointer;font-weight:bold}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--ac)}
+.bars{display:grid;grid-template-columns:repeat(10,1fr);gap:6px;align-items:end;height:130px;margin-top:8px}
+.b{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;font-size:12px}
+.b i{display:block;width:100%;background:var(--ac);border-radius:3px 3px 0 0;min-height:2px}
+.b.hi i{background:var(--ok)}.b.lo i{background:var(--no)}
+.st{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.st div{background:var(--bg);border:1px solid var(--ln);border-radius:4px;padding:8px}
+.st b{display:block;font-size:20px;color:var(--tx)}.st span{font-size:12px;color:var(--mu)}
+#last{font-family:monospace;letter-spacing:3px;word-break:break-all;color:var(--ac)}
+.neg{color:var(--no)!important}.pos{color:var(--ok)!important}
+</style></head><body>
+<h1>Digit Lab</h1>
+<p>Live last-digit statistics and a backtester for Even/Odd, Over/Under and Matches/Differs.</p>
+<div class="pn warn"><h2>Read this first</h2>
+<p>Deriv synthetic index digits are random and independent. This tool shows what happened, not what happens next. No setting here can guarantee wins, and the backtester will show you that with numbers.</p></div>
+
+<div class="pn"><h2>Live digits</h2>
+<div class="row">
+<label>Market<select id="sym"></select></label>
+<button id="go">Connect</button><span id="status" style="color:var(--mu)">Disconnected</span></div>
+<p style="margin-top:8px">Last 40 digits</p><div id="last">-</div>
+<div class="bars" id="bars"></div>
+<p id="bnote" style="margin-top:6px">Green = most frequent, red = least frequent in the sample.</p>
+<div class="st" style="margin-top:8px">
+<div><b id="n">0</b><span>Ticks collected</span></div>
+<div><b id="eo">-</b><span>Even / Odd %</span></div>
+<div><b id="ou">-</b><span>Over / Under (barrier)</span></div>
+<div><b id="md">-</b><span>Matches / Differs (digit)</span></div>
+<div><b id="stk">-</b><span>Current streak</span></div></div>
+
+<div class="row" style="margin-top:14px">
+<label>Hot/cold window<select id="win"><option>25</option><option selected>50</option><option>100</option><option>250</option></select></label>
+<label>Alert when streak reaches<input id="alN" type="number" min="2" value="6"></label>
+<label>Alert on<select id="alC"><option value="even">Even/Odd</option><option value="ou">Over/Under</option><option value="digit">Chosen digit</option></select></label>
+</div>
+<p style="margin-top:8px">Hot/cold digits (last <span id="winlabel">50</span> ticks)</p>
+<div class="bars" id="hotbars"></div>
+<div id="alertbox" style="margin-top:8px;padding:8px;border-radius:4px;background:var(--bg);border:1px solid var(--ln);color:var(--mu)">No streak alert yet.</div>
+<p style="margin-top:10px">Short window (20) vs long window (100) — a big gap between them is still just noise, not a signal.</p>
+<div class="st" id="cmp"></div>
+</div>
+
+<div class="pn"><h2>Backtest</h2>
+<div class="row">
+<label>Contract<select id="ct"><option value="even">Even</option><option value="odd">Odd</option><option value="over">Over</option><option value="under">Under</option><option value="match">Matches</option><option value="diff">Differs</option></select></label>
+<label>Barrier / digit (0-9)<input id="br" type="number" min="0" max="9" value="5"></label>
+<label>Stake<input id="sk" type="number" min="0.35" step="0.05" value="1"></label>
+<label>Payout % of stake<input id="po" type="number" step="0.1" value="95"></label>
+<label>Enter after N-tick streak<input id="ns" type="number" min="0" value="0"></label>
+</div>
+<div class="row" style="margin-top:10px">
+<button id="btL">Test on live ticks</button>
+<label>Simulated ticks<input id="sn" type="number" value="100000"></label>
+<button id="btS">Test on random ticks</button></div>
+<p style="margin-top:8px">Payouts are editable and only approximate. Check the real percentage on Deriv for your contract and barrier. The streak filter waits until the contract condition was true N ticks in a row, then trades the next tick.</p>
+<div class="st" id="res"></div></div>
+
+<script>
+const SYMS={"Volatility 10":"R_10","Volatility 25":"R_25","Volatility 50":"R_50","Volatility 75":"R_75","Volatility 100":"R_100","Volatility 10 (1s)":"1HZ10V","Volatility 25 (1s)":"1HZ25V","Volatility 50 (1s)":"1HZ50V","Volatility 75 (1s)":"1HZ75V","Volatility 100 (1s)":"1HZ100V"};
+const $=id=>document.getElementById(id);
+for(const k in SYMS)$("sym").add(new Option(k,SYMS[k]));
+let digits=[],ws=null,pip=2;
+function hit(d,c,b){return c=="even"?d%2==0:c=="odd"?d%2==1:c=="over"?d>b:c=="under"?d<b:c=="match"?d==b:d!=b}
+function dg(q){return +q.toFixed(pip).slice(-1)}
+function draw(){
+ const n=digits.length,cnt=Array(10).fill(0);digits.forEach(d=>cnt[d]++);
+ const mx=Math.max(...cnt),mn=Math.min(...cnt);
+ $("bars").innerHTML=cnt.map((c,i)=>`<div class="b ${n&&c==mx?'hi':n&&c==mn?'lo':''}"><span>${n?(c/n*100).toFixed(1):0}%</span><i style="height:${mx?c/mx*85:0}%"></i><b>${i}</b></div>`).join("");
+ $("n").textContent=n;$("last").textContent=digits.slice(-40).join(" ")||"-";
+ if(!n)return;const b=+$("br").value,p=f=>(digits.filter(f).length/n*100).toFixed(1);
+ $("eo").textContent=p(d=>d%2==0)+" / "+p(d=>d%2==1);
+ $("ou").textContent=p(d=>d>b)+" / "+p(d=>d<b);
+ $("md").textContent=p(d=>d==b)+" / "+p(d=>d!=b);
+ let s=1,l=digits[n-1]%2;for(let i=n-2;i>=0&&digits[i]%2==l;i--)s++;
+ $("stk").textContent=s+" "+(l?"odd":"even");
+ drawHotCold();drawCmp();checkAlert();
+}
+function drawHotCold(){
+ const w=+$("win").value;$("winlabel").textContent=w;
+ const sl=digits.slice(-w),n=sl.length,cnt=Array(10).fill(0);sl.forEach(d=>cnt[d]++);
+ const mx=Math.max(...cnt),mn=Math.min(...cnt);
+ $("hotbars").innerHTML=cnt.map((c,i)=>`<div class="b ${n&&c==mx?'hi':n&&c==mn?'lo':''}"><span>${c}</span><i style="height:${mx?c/mx*85:0}%"></i><b>${i}</b></div>`).join("");
+}
+function pct(arr,f){return arr.length?(arr.filter(f).length/arr.length*100).toFixed(1):"-"}
+function drawCmp(){
+ const b=+$("br").value,s20=digits.slice(-20),s100=digits.slice(-100);
+ const row=(label,f)=>`<div><b>${pct(s20,f)}% / ${pct(s100,f)}%</b><span>${label} (20 / 100)</span></div>`;
+ $("cmp").innerHTML=row("Even %",d=>d%2==0)+row("Over "+b+" %",d=>d>b)+row("Digit "+b+" %",d=>d==b);
+}
+function checkAlert(){
+ const need=+$("alN").value,mode=$("alC").value,b=+$("br").value;
+ let key;if(mode=="even")key=d=>d%2;else if(mode=="ou")key=d=>d>b?1:d<b?0:-1;else key=d=>d==b?1:0;
+ let s=1;for(let i=digits.length-2;i>=0&&key(digits[i])==key(digits[digits.length-1]);i--)s++;
+ const box=$("alertbox");
+ if(s>=need){box.style.borderColor="var(--ac)";box.style.color="var(--ac)";
+  box.textContent=`Streak alert: last ${s} ticks all "${describeKey(mode,key(digits[digits.length-1]),b)}". This is a pattern flag, not a prediction — the next digit is still independent.`;
+ }else{box.style.borderColor="var(--ln)";box.style.color="var(--mu)";box.textContent=`Current streak: ${s} (alert set at ${need}+).`}
+}
+function describeKey(mode,v,b){if(mode=="even")return v?"odd":"even";if(mode=="ou")return v==1?"over "+b:v==0?"under "+b:"equal to "+b;return v?"digit "+b:"not digit "+b}
+$("br").oninput=draw;$("win").onchange=draw;$("alN").oninput=checkAlert;$("alC").onchange=checkAlert;
+$("go").onclick=()=>{
+ if(ws){ws.close();ws=null;$("go").textContent="Connect";return}
+ digits=[];$("status").textContent="Connecting...";
+ ws=new WebSocket("wss://ws.derivws.com/websockets/v3?app_id=1089");
+ ws.onopen=()=>{$("status").textContent="Connected";$("go").textContent="Disconnect";
+  ws.send(JSON.stringify({ticks_history:$("sym").value,end:"latest",count:1000,style:"ticks"}));
+  ws.send(JSON.stringify({ticks:$("sym").value,subscribe:1}))};
+ ws.onmessage=e=>{const m=JSON.parse(e.data);
+  if(m.error){$("status").textContent="Error: "+m.error.message;return}
+  if(m.history){pip=m.pip_size||pip;digits=m.history.prices.map(dg);draw()}
+  if(m.tick){pip=m.tick.pipsize||pip;digits.push(dg(m.tick.quote));draw()}};
+ ws.onclose=()=>{$("status").textContent="Disconnected";$("go").textContent="Connect";ws=null};
+ ws.onerror=()=>{$("status").textContent="Connection failed. Open this file in a browser with internet access."};
+};
+function bt(arr){
+ const c=$("ct").value,b=+$("br").value,st=+$("sk").value,po=+$("po").value/100,N=+$("ns").value;
+ let w=0,l=0,pl=0,peak=0,dd=0,run=0,lose=0,mxl=0,streak=0;
+ for(let i=0;i<arr.length-1;i++){
+  streak=hit(arr[i],c,b)?streak+1:0;
+  if(streak<N)continue;
+  if(hit(arr[i+1],c,b)){w++;pl+=st*po;lose=0}else{l++;pl-=st;lose++;mxl=Math.max(mxl,lose)}
+  peak=Math.max(peak,pl);dd=Math.max(dd,peak-pl)}
+ const t=w+l;if(!t){$("res").innerHTML="<p>No trades triggered. Lower the streak or add more ticks.</p>";return}
+ const be=(1/(1+po)*100).toFixed(1),wr=(w/t*100).toFixed(1);
+ const cell=(v,s,c)=>`<div><b class="${c||''}">${v}</b><span>${s}</span></div>`;
+ $("res").innerHTML=cell(t,"Trades")+cell(wr+"%","Win rate")+cell(be+"%","Break-even win rate")+
+  cell((pl>=0?"+":"")+pl.toFixed(2),"Net profit/loss",pl>=0?"pos":"neg")+cell(dd.toFixed(2),"Max drawdown")+cell(mxl,"Longest losing run");
+}
+$("btL").onclick=()=>digits.length>2?bt(digits):$("res").innerHTML="<p>Connect first to collect live ticks.</p>";
+$("btS").onclick=()=>{const n=Math.min(+$("sn").value||1e5,5e6),a=new Array(n);for(let i=0;i<n;i++)a[i]=Math.floor(Math.random()*10);bt(a)};
+draw();
+</script></body></html>
